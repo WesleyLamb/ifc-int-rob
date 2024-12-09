@@ -1,105 +1,106 @@
-// Projeto 30: Robo que acompanha uma linha
+#include <AFMotor.h>
 
-#define lights 9
-int LDR1, LDR2, LDR3; // valores dos sensores
+// Inicializa os motores
+AF_DCMotor motorEsquerdo(4); // Motor esquerdo conectado ao M4
+AF_DCMotor motorDireito(3);  // Motor direito conectado ao M3
 
-// deslocamentos (offsets) de calibração 
-int leftOffset = 0, rightOffset = 0 , centre = 0;
+// Define os pinos dos sensores de linha
+const int sensorEsquerdo = 0;  // Sensor esquerdo no pino digital 2
+const int sensorMeio = 1;      // Sensor central no pino digital 3
+const int sensorDireito = 2;   // Sensor direito no pino digital 4
 
-// pinos para a velocidade e direção do motor 
-int speed1 = 3, speed2 = 11, direction1 = 12, direction2 = 13;
+// Define a velocidade dos motores
+const int VELOCIDADE_NORMAL = 150; // Velocidade padrão
+const int VELOCIDADE_CURVA_INF = 75;  // Velocidade ajustada para curvas
+const int VELOCIDADE_CURVA_SUP = 200;  // Velocidade ajustada para curvas
+const int limitadorAnalogico = 500;
 
-// velocidade inicial e deslocamento da rotação
-int startSpeed = 70, rotate = 30;
-
-// limiar do sensor
-int threshold = 5;
-
-// velocidades iniciais dos motores esquerdo e direito
-int left = startSpeed, right = startSpeed;
-
-// Rotina de calibração do sensor
-void calibrate() {
-
-  // executa 10 vezes, para obter uma média
-  for (int x = 0; x < 10; x++) { 
-    // acende as luzes
-    digitalWrite(lights, HIGH); 
-
-    delay(100);
-
-    // lê os 3 sensores
-    LDR1 = analogRead(0);
-    LDR2 = analogRead(1);
-    LDR3 = analogRead(2);
-
-    leftOffset = leftOffset + LDR1; // adiciona o valor do sensor da esquerda ao total 
-    centre = centre + LDR2; // adiciona o valor do sensor do centro ao total
-    rightOffset = rightOffset + LDR3; // adiciona o valor do sensor da direita ao total
-
-    delay(100);
-    digitalWrite(lights, LOW); // apaga as luzes
-    delay(100);
-  }
-
-  // obtém a média para cada sensor
-  leftOffset = leftOffset / 10;
-  rightOffset = rightOffset / 10;
-  centre = centre / 10;
-
-  // calcula os deslocamentos para os sensores esquerdo e direito
-  leftOffset = centre - leftOffset;
-  rightOffset = centre - rightOffset;
-}
+#define SEGUINDO_RETO 0
+#define VIRANDO_DIREITA 1
+#define VIRANDO_ESQUERDA 2
+int ultimoEstado = SEGUINDO_RETO;
 
 void setup() {
-
-  // define os pinos dos motores como saldas
-  pinMode(lights, OUTPUT); // luzes
-  pinMode(speed1, OUTPUT);
-  pinMode(speed2, OUTPUT);
-  pinMode(direction1, OUTPUT);
-  pinMode(direction2, OUTPUT);
-
-  // calibra os sensores
-  calibrate();
   delay(3000);
-  digitalWrite(lights, HIGH); // acende as luzes 
-  delay(100);
+  // Configura os pinos dos sensores como entrada
+  pinMode(sensorEsquerdo, INPUT);
+  pinMode(sensorMeio, INPUT);
+  pinMode(sensorDireito, INPUT);
 
-  // define a direção do motor para frente
-  digitalWrite(direction1, HIGH);
-  digitalWrite(direction2, HIGH);
-
-  // define a velocidade de ambos os motores
-  analogWrite(speed1, left);
-  analogWrite(speed2, right);
+  // Inicializa a comunicação serial para depuração
+  Serial.begin(9600);
+//  Serial.println("Carrinho Seguidor de Linha Iniciado");
 }
 
 void loop() {
+  // Lê os valores dos sensores
+  int leituraEsquerdo = analogRead(sensorEsquerdo);
+  int leituraMeio = analogRead(sensorMeio);
+  int leituraDireito = analogRead(sensorDireito);
 
-  // utiliza a mesma velocidade em ambos os motores
-  left = startSpeed;
-  right = startSpeed;
+  // Depuração
+  Serial.print("E: ");
+  Serial.print(leituraEsquerdo);
+  Serial.print(" | M: ");
+  Serial.print(leituraMeio);
+  Serial.print(" | D: ");
+  Serial.println(leituraDireito);
 
-  // lé os sensores e adiciona os deslocamentos
-  LDR1 = analogRead(0) + leftOffset;
-  LDR2 = analogRead(1);
-  LDR3 = analogRead(2) + rightOffset;
-
-  // se LDR1 for maior do que o sensor do centro limiar, vire para a direita
-  if (LDR1 > (LDR2+threshold)) {
-    left = startSpeed + rotate;
-    right = startSpeed - rotate;
+  // Controle do carrinho  
+  if (leituraMeio > limitadorAnalogico) {
+    // Linha preta detectada pelo sensor do meio
+    ultimoEstado = SEGUINDO_RETO;
+    andarFrente();
+  } else if (leituraEsquerdo > limitadorAnalogico) {
+    // Linha preta detectada pelo sensor esquerdo
+    ultimoEstado = VIRANDO_ESQUERDA;
+    curvaEsquerda();
+  } else if (leituraDireito > limitadorAnalogico) {
+    // Linha preta detectada pelo sensor direito
+    ultimoEstado = VIRANDO_DIREITA;
+    curvaDireita();
+  } else {
+    switch (ultimoEstado) {
+      case SEGUINDO_RETO:
+        andarFrente();
+        break;
+      case VIRANDO_ESQUERDA:
+        curvaEsquerda();
+        break;
+      case VIRANDO_DIREITA:
+        curvaDireita();
+        break; 
+    }
+    
+    // Nenhum sensor detecta a linha preta
+//    parar();
   }
 
-  // se LDR3 for maior do que o sensor do centro limiar, vire para a esquerda
-  if (LDR3 > (LDR2+threshold)) { 
-    left = startSpeed - rotate;
-    right = startSpeed + rotate;
-  }
+  delay(50); // Pequena pausa para leitura estável dos sensores
+}
 
-  // Envia os valores de velocidade para os motores
-  analogWrite(speed1, left);
-  analogWrite(speed2, right);
+void andarFrente() {
+  motorEsquerdo.setSpeed(VELOCIDADE_NORMAL);
+  motorDireito.setSpeed(VELOCIDADE_NORMAL);
+  motorEsquerdo.run(FORWARD);
+  motorDireito.run(BACKWARD);
+}
+
+void curvaEsquerda() {
+  motorEsquerdo.setSpeed(VELOCIDADE_CURVA_INF); // Aumenta a velocidade da roda esquerda
+  motorDireito.setSpeed(VELOCIDADE_CURVA_SUP); // Mantém a velocidade da roda direita
+  motorEsquerdo.run(FORWARD);
+  motorDireito.run(BACKWARD);
+}
+
+void curvaDireita() {
+  motorEsquerdo.setSpeed(VELOCIDADE_CURVA_SUP); // Mantém a velocidade da roda esquerda
+  motorDireito.setSpeed(VELOCIDADE_CURVA_INF);  // Aumenta a velocidade da roda direita
+  motorEsquerdo.run(FORWARD);
+  motorDireito.run(BACKWARD);
+}
+
+void parar() {
+  motorEsquerdo.run(RELEASE);
+  motorDireito.run(RELEASE);
 }
